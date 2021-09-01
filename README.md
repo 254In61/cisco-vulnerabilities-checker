@@ -25,5 +25,4 @@ Definitions
 
 Code Authors
 ------------
-- Ref AdamMack2007 Github ( https://github.com/254In61/Ansible-Cisco-CVE-Parser )
 - Allan Maseghe 
