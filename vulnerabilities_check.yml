@@ -1,0 +1,101 @@
+---
+# Collection of ios facts to obtain ansible_net_iostype & ansible_net_version
+# Step already done in Ansible Tower?
+- name: Extraction of device Platform and IOS/IOSXE version for API Calls
+  block: 
+    - name: Collect facts
+      ios_facts:
+        gather_subset: all
+
+    - debug:
+        msg:
+          - "Hostname : {{ ansible_net_hostname }}"
+          - "Model : {{ ansible_net_model }}"
+          - "Plaform : {{ ansible_net_iostype }}"
+          - "Version : {{ ansible_net_version }}"
+
+    - name: Collect platform & version names for IOS-XE
+      set_fact:
+        platform: iosxe
+        version: "{{ ansible_net_version }}"
+      when: ansible_net_iostype == "IOS-XE"
+
+    - name: Collect platform & version names for IOS
+      set_fact:
+        platform: ios
+        version: "{{ ansible_net_version }}"
+      when: ansible_net_iostype == "IOS"
+  
+  ignore_errors: true
+  vars:
+    ansible_connection: network_cli
+    ansible_network_os: ios
+    ansible_ssh_user: "{{ username..Could be Radius/Tacacs or Local credentials }}"
+    ansible_ssh_pass: "{{ password..Could be Radius/Tacacs or Local credentials  }}"
+
+# Generate API token for subsequent tasks & API calls to Cisco Software checker DB
+# Before applying the next step you need to have your cisco API key and client_secret from cisco.
+# Ref https://developer.cisco.com/docs/psirt/
+
+
+- name: Cisco PSIRT API Tasks
+  block:
+    - name: Generate Cisco PSIRT API Token
+      uri:
+        url: https://cloudsso.cisco.com/as/token.oauth2
+        method: POST
+        body_format: form-urlencoded
+        body: "client_id={{ psirt_key }}&client_secret={{ psirt_secret }}&grant_type=client_credentials"
+        headers:
+          Accept: application/json
+          Content-Type: application/x-www-form-urlencoded
+        status_code: 200
+      register: token_output
+      run_once: true
+
+    - name: Save generated token
+      set_fact:
+        token: "{{ token_output['json']['access_token'] }}"
+  
+    - debug:
+        msg: "New token created = {{ token }}"
+      
+    - name: API Call to cisco software checker for CVEs list per platform & version 
+      uri:
+        url: https://api.cisco.com/security/advisories/{{ platform }}?version={{ version }}
+        method: GET
+        headers:
+          Accept: application/json
+          Authorization: "Bearer {{ token }}"
+        status_code: 200
+      register: cve_list
+  
+  delegate_to: localhost
+  
+# Write vulnerabilities to .txt file >> Send file as an email
+# Chosen fields could be changed as per ones needs
+# For now , advisory ID,Cvss score, Security Impact Rating(SIR) and fixed ios version
+
+- name: Write to file and email
+  block:
+    - name: Create file if it doesn't exist
+      file:
+        path: "files/{{ ansible_net_hostname }}_vulnerabilities_.txt" # Edit to your desired directory path
+        state: touch
+
+    - name: Write vulnerabilities summary to a .txt file
+      lineinfile:
+        dest: "files/{{ ansible_net_hostname }}_vulnerabilities_.txt"
+        line: "advisory_ID = {{ item['advisoryId'] }} , 
+            cvss_score = {{ item['cvssBaseScore'] }} , 
+            severity = {{ item['sir'] }} ,
+            first_fixed_version = {{ item['firstFixed'][0] }}
+            "
+      loop: "{{ cve_list['json']['advisories'] }}"
+      loop_control: # Reduce verbose
+        label: "{{ item['advisoryId'] }}"
+
+    #- name: Emailing the file created
+
+  delegate_to: localhost
+  ignore_errors: true

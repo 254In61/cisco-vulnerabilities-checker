@@ -1,0 +1,11 @@
+---
+# Main file calling on the tasks within vulnerabilities_check.yml
+- name: Cisco vulnerability check
+  hosts: "all"  # Dependent on your environment
+  gather_facts: false
+   
+  tasks:
+    - include: vulnerabilities_check.yml
+
+
+  
